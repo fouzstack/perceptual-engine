@@ -104,7 +104,7 @@ export async function measureAsyncExecutionTime<T>(fn: () => Promise<T>, label?:
   return { result, time };
 }
 
-export function rafDebounce<T extends (...args: any[]) => void>(fn: T, delay: number = 16): (...args: Parameters<T>) => void {
+export function rafDebounce<T extends (...args: any[]) => void>(fn: T, /* delay: number = 16 */): (...args: Parameters<T>) => void {
   let rafId: number | null = null;
   let lastArgs: Parameters<T> | null = null;
   return (...args: Parameters<T>) => {

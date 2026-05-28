@@ -87,7 +87,7 @@ export function getElementWidth(element: HTMLElement): number {
   return element.getBoundingClientRect().width;
 }
 
-export function isInViewport(element: HTMLElement, viewportHeight: number, scrollTop: number): boolean {
+export function isInViewport(element: HTMLElement, viewportHeight: number,/*  scrollTop: number */): boolean {
   const rect = element.getBoundingClientRect();
   return rect.bottom > 0 && rect.top < viewportHeight;
 }
@@ -113,7 +113,7 @@ export function cloneTemplate(templateId: string): HTMLElement | null {
 
 export function createScrollDebouncer(
   callback: (scrollTop: number, scrollLeft: number) => void,
-  delay: number = 16
+  //delay: number = 16
 ): (scrollTop: number, scrollLeft: number) => void {
   let rafId: number | null = null;
   let pendingScrollTop = 0;

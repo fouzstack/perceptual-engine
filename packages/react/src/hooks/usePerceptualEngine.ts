@@ -6,15 +6,21 @@ import { PerceptualEngine } from '@/perceptual-engine/core/src/engine/Perceptual
 import type { PerceptualMetrics, ElementsRenderedPayload } from '@/perceptual-engine/core/src/types/engine';
 import { waitForStableLayout } from '@/perceptual-engine/core/src/utils/waitForStableLayout';
 
-
 export function usePerceptualEngine(
   options: UsePerceptualEngineOptions
-): EngineHandle {
+): EngineHandle & { totalHeight: number } {
   const engineRef = useRef<PerceptualEngine | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [containerElement, setContainerElement] = useState<HTMLDivElement | null>(null);
   const scrollRestorationRef = useRef<ScrollRestoration | null>(null);
-  const onElementsRenderedRef = useRef<(payload: ElementsRenderedPayload) => void>(options.onElementsRendered || (() => {}));
+  const onElementsRenderedRef = useRef<(payload: ElementsRenderedPayload) => void>(
+    options.onElementsRendered || (() => {})
+  );
+
+  // 🔥 Estado reactivo para totalHeight - se actualiza dinámicamente
+  const [totalHeight, setTotalHeight] = useState<number>(
+    options.totalItems * (options.estimatedItemSize ?? 50)
+  );
 
   onElementsRenderedRef.current = options.onElementsRendered || (() => {});
 
@@ -33,7 +39,10 @@ export function usePerceptualEngine(
 
     const bootstrap = async () => {
       const stable = await waitForStableLayout(containerElement, {
-        timeout: 3000, minHeight: 10, minWidth: 10, stableFrames: 2,
+        timeout: 3000,
+        minHeight: 10,
+        minWidth: 10,
+        stableFrames: 2,
       });
 
       if (cancelled || !stable) return;
@@ -57,16 +66,24 @@ export function usePerceptualEngine(
         onElementsRenderedRef.current(payload);
       };
 
+      // 🔥 Sincronizar totalHeight dinámico desde el engine
       engine.onTotalHeightChange = (height: number) => {
-        updateScrollState({ totalHeight: height });
+        if (height > 0) {
+          setTotalHeight(height);
+          updateScrollState({ totalHeight: height });
+        }
       };
 
       engineRef.current = engine;
       setEngine(engine);
 
       engine.onMetricsUpdate((metrics: PerceptualMetrics) => updateMetrics(metrics));
+
       engine.onScrollUpdate((payload) => {
-        const percentage = payload.totalHeight > 0 ? (payload.scrollTop / payload.totalHeight) * 100 : 0;
+        const percentage =
+          payload.totalHeight > 0
+            ? (payload.scrollTop / payload.totalHeight) * 100
+            : 0;
         updateScrollState({
           isScrolling: Math.abs(payload.velocity) > 0.05,
           velocity: payload.velocity,
@@ -76,9 +93,15 @@ export function usePerceptualEngine(
           totalHeight: payload.totalHeight,
         });
         options.onScroll?.(payload.scrollTop);
-        options.onVisibleRangeChange?.(payload.visibleRange.start, payload.visibleRange.end);
+        options.onVisibleRangeChange?.(
+          payload.visibleRange.start,
+          payload.visibleRange.end
+        );
       });
-      engine.onQualityChange((quality) => updateMetrics({ qualityLevel: quality }));
+
+      engine.onQualityChange((quality) =>
+        updateMetrics({ qualityLevel: quality })
+      );
 
       engine.initialize();
       engine.start();
@@ -103,6 +126,8 @@ export function usePerceptualEngine(
       engineRef.current.updateItems(new Array(options.totalItems));
       engineRef.current.refresh();
     }
+    // Actualizar totalHeight estimado cuando cambia totalItems
+    setTotalHeight(options.totalItems * (options.estimatedItemSize ?? 50));
   }, [options.totalItems]);
 
   useEffect(() => {
@@ -115,10 +140,14 @@ export function usePerceptualEngine(
       persistenceKey: options.persistenceKey,
       strategy: options.persistenceStrategy || 'anchor',
       debounceMs: 100,
-      getItemKey: options.getItemKeyForPersistence || ((index: number) => index),
+      getItemKey:
+        options.getItemKeyForPersistence || ((index: number) => index),
     });
     scrollRestorationRef.current = restoration;
-    return () => { restoration.destroy(); scrollRestorationRef.current = null; };
+    return () => {
+      restoration.destroy();
+      scrollRestorationRef.current = null;
+    };
   }, [options.persistenceKey, options.persistenceStrategy]);
 
   useEffect(() => {
@@ -128,53 +157,96 @@ export function usePerceptualEngine(
       (scrollState) => {
         if (scrollState.isScrolling) {
           scrollRestorationRef.current?.captureAndSave(
-            scrollState.scrollTop, scrollState.velocity, scrollState.direction,
-            options.totalItems, options.estimatedItemSize || 50
+            scrollState.scrollTop,
+            scrollState.velocity,
+            scrollState.direction,
+            options.totalItems,
+            options.estimatedItemSize || 50
           );
         }
       },
-      { equalityFn: (a, b) => a.scrollTop === b.scrollTop && a.isScrolling === b.isScrolling }
+      {
+        equalityFn: (a, b) =>
+          a.scrollTop === b.scrollTop && a.isScrolling === b.isScrolling,
+      }
     );
     return unsubscribe;
   }, [options.persistenceKey, options.totalItems, options.estimatedItemSize]);
 
-  const scrollToIndex = useCallback((index: number, align: 'start' | 'center' | 'end' = 'start', behavior: ScrollBehavior = 'smooth') => {
-    engineRef.current?.scrollToIndex(index, align, behavior);
-  }, []);
+  const scrollToIndex = useCallback(
+    (
+      index: number,
+      align: 'start' | 'center' | 'end' = 'start',
+      behavior: ScrollBehavior = 'smooth'
+    ) => {
+      engineRef.current?.scrollToIndex(index, align, behavior);
+    },
+    []
+  );
 
-  const scrollTo = useCallback((top: number, behavior: ScrollBehavior = 'smooth') => {
-    containerRef.current?.scrollTo({ top, behavior });
-  }, []);
+  const scrollTo = useCallback(
+    (top: number, behavior: ScrollBehavior = 'smooth') => {
+      containerRef.current?.scrollTo({ top, behavior });
+    },
+    []
+  );
 
-  const measureItem = useCallback((index: number, height: number, width?: number) => {
-    engineRef.current?.measureItem(index, height, width);
-  }, []);
+  const measureItem = useCallback(
+    (index: number, height: number, width?: number) => {
+      engineRef.current?.measureItem(index, height, width);
+    },
+    []
+  );
 
-  const refresh = useCallback(() => { engineRef.current?.refresh(); }, []);
+  const refresh = useCallback(() => {
+    engineRef.current?.refresh();
+  }, []);
 
   const saveScrollState = useCallback(() => {
     if (!scrollRestorationRef.current) return;
     const scrollState = useEngineStore.getState().scrollState;
     scrollRestorationRef.current.captureAndSave(
-      scrollState.scrollTop, scrollState.velocity, scrollState.direction,
-      options.totalItems, options.estimatedItemSize || 50
+      scrollState.scrollTop,
+      scrollState.velocity,
+      scrollState.direction,
+      options.totalItems,
+      options.estimatedItemSize || 50
     );
   }, [options.totalItems, options.estimatedItemSize]);
 
-  const restoreScrollState = useCallback((behavior: ScrollBehavior = 'auto'): boolean => {
-    if (!scrollRestorationRef.current || !containerRef.current) return false;
-    const keyToIndex = new Map<string | number, number>();
-    const getKey = options.getItemKeyForPersistence || ((idx: number) => idx);
-    for (let i = 0; i < options.totalItems; i++) keyToIndex.set(getKey(i), i);
-    return scrollRestorationRef.current.restore(containerRef.current, keyToIndex, behavior);
-  }, [options.totalItems, options.getItemKeyForPersistence]);
+  const restoreScrollState = useCallback(
+    (behavior: ScrollBehavior = 'auto'): boolean => {
+      if (!scrollRestorationRef.current || !containerRef.current) return false;
+      const keyToIndex = new Map<string | number, number>();
+      const getKey =
+        options.getItemKeyForPersistence || ((idx: number) => idx);
+      for (let i = 0; i < options.totalItems; i++)
+        keyToIndex.set(getKey(i), i);
+      return scrollRestorationRef.current.restore(
+        containerRef.current,
+        keyToIndex,
+        behavior
+      );
+    },
+    [options.totalItems, options.getItemKeyForPersistence]
+  );
 
-  const clearScrollState = useCallback(() => { scrollRestorationRef.current?.clear(); }, []);
+  const clearScrollState = useCallback(() => {
+    scrollRestorationRef.current?.clear();
+  }, []);
 
   return {
-    engineRef, containerRefCallback, containerElement,
-    scrollToIndex, scrollTo, measureItem, refresh,
-    saveScrollState, restoreScrollState, clearScrollState,
+    engineRef,
+    containerRefCallback,
+    containerElement,
+    scrollToIndex,
+    scrollTo,
+    measureItem,
+    refresh,
+    saveScrollState,
+    restoreScrollState,
+    clearScrollState, //@ts-ignore
     scrollRestoration: scrollRestorationRef.current,
+    totalHeight,
   };
 }

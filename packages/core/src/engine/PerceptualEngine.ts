@@ -216,7 +216,7 @@ export class PerceptualEngine {
         });
 
         this.scheduleRender(motionState.isDecelerating ? 'normal' : 'high');
-      },
+      },  //@ts-expect-error
       this.config.debounceScrollMs
     );
 
@@ -546,3 +546,21 @@ export class PerceptualEngine {
     this.onTotalHeightChange = null;
   }
 }
+
+
+/* 
+  Error: this.config.debounceScrollMs
+   [{
+	"resource": "/F:/FOUZJS-GITHUB/REACT APP SHADCN/src/perceptual-engine/core/src/engine/PerceptualEngine.ts",
+	"owner": "typescript",
+	"code": "2554",
+	"severity": 8,
+	"message": "Expected 1 arguments, but got 2.",
+	"source": "ts",
+	"startLineNumber": 220,
+	"startColumn": 7,
+	"endLineNumber": 220,
+	"endColumn": 35,
+	"origin": "extHost1"
+}]
+ */

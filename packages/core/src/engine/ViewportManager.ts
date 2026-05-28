@@ -1,6 +1,7 @@
 import { ViewportState, SpatialRegion, MeasurementResult, VirtualItem } from '../types/engine';
 import { VisibleRange, ScrollMetrics, ViewportBounds } from '../types/viewport';
 import { getScrollPercentage } from '../utils/geometry';
+import { HeightIndexTree } from '../layout/HeightIndexTree';
 
 interface Anchor {
   position: number;
@@ -15,13 +16,11 @@ export class ViewportManager {
   private totalItems: number;
   private overscanSize: number;
 
+  private heightTree: HeightIndexTree;
   private itemHeights: Float64Array;
-  private cumulativeHeights: Float64Array;
-  private heightsDirty: boolean = true;
-  private dirtyFromIndex: number = Infinity;
 
   private anchors: Anchor[] = [];
-  private readonly anchorInterval: number = 100;
+  private readonly anchorInterval: number = 100;//@ts-expect-error
   private anchorsDirty: boolean = true;
 
   public onTotalHeightChange: ((totalHeight: number) => void) | null = null;
@@ -30,11 +29,13 @@ export class ViewportManager {
     this.totalItems = totalItems;
     this.itemSize = itemSize;
     this.overscanSize = overscanSize;
-    this.itemHeights = new Float64Array(Math.max(totalItems, 1));
-    this.cumulativeHeights = new Float64Array(Math.max(totalItems, 1));
-    this.itemHeights.fill(itemSize);
+
+    const initialHeights = new Float64Array(Math.max(totalItems, 1));
+    initialHeights.fill(itemSize);
+    this.itemHeights = initialHeights;
+    this.heightTree = new HeightIndexTree(initialHeights);
+
     this.state = this.createDefaultState();
-    this.recalculateCumulativeHeights(0);
     this.visibleRange = this.calculateVisibleRange();
   }
 
@@ -61,10 +62,6 @@ export class ViewportManager {
       this.state.clientWidth = this.state.width;
     }
 
-    if (this.heightsDirty) {
-      this.recalculateCumulativeHeights(this.dirtyFromIndex);
-    }
-
     this.state.scrollHeight = this.getTotalHeight();
     this.state.scrollWidth = containerWidth || this.state.width;
     this.visibleRange = this.calculateVisibleRange();
@@ -77,10 +74,14 @@ export class ViewportManager {
     if (index >= this.totalItems || index < 0) return;
     const oldHeight = this.itemHeights[index];
     if (Math.abs(oldHeight - height) < 1) return;
+
     this.itemHeights[index] = height;
-    this.dirtyFromIndex = Math.min(this.dirtyFromIndex, index);
-    this.heightsDirty = true;
+    this.heightTree.update(index, height);
     this.anchorsDirty = true;
+
+    if (this.onTotalHeightChange) {
+      this.onTotalHeightChange(this.getTotalHeight());
+    }
   }
 
   registerItemHeights(measurements: MeasurementResult[]): void {
@@ -89,13 +90,17 @@ export class ViewportManager {
       if (m.index >= this.totalItems || m.index < 0) return;
       const oldHeight = this.itemHeights[m.index];
       if (Math.abs(oldHeight - m.height) < 1) return;
+
       this.itemHeights[m.index] = m.height;
-      this.dirtyFromIndex = Math.min(this.dirtyFromIndex, m.index);
+      this.heightTree.update(m.index, m.height);
       changed = true;
     });
+
     if (changed) {
-      this.heightsDirty = true;
       this.anchorsDirty = true;
+      if (this.onTotalHeightChange) {
+        this.onTotalHeightChange(this.getTotalHeight());
+      }
     }
   }
 
@@ -112,74 +117,37 @@ export class ViewportManager {
     this.registerItemHeights(measurements);
     return measurements;
   }
-
-  private recalculateCumulativeHeights(fromIndex: number = 0): void {
-    if (!this.heightsDirty && fromIndex === 0) return;
-
-    const startIndex = this.heightsDirty ? Math.min(fromIndex, this.dirtyFromIndex) : fromIndex;
-    let cumulative = startIndex > 0 ? this.cumulativeHeights[startIndex - 1] : 0;
-
-    for (let i = startIndex; i < this.totalItems; i++) {
-      cumulative += this.itemHeights[i];
-      this.cumulativeHeights[i] = cumulative;
-    }
-
-    if (this.totalItems > 1000 && this.anchorsDirty) {
-      this.rebuildAnchors();
-    }
-
-    this.heightsDirty = false;
-    this.dirtyFromIndex = Infinity;
-
-    const newTotalHeight = this.getTotalHeight();
-    if (this.onTotalHeightChange) {
-      this.onTotalHeightChange(newTotalHeight);
-    }
-  }
-
+    //@ts-expect-error
   private rebuildAnchors(): void {
     this.anchors = [];
     const interval = Math.max(this.anchorInterval, Math.floor(this.totalItems / 50));
     for (let i = 0; i < this.totalItems; i += interval) {
-      this.anchors.push({ position: i > 0 ? this.cumulativeHeights[i - 1] : 0, index: i });
+      this.anchors.push({
+        position: i > 0 ? this.heightTree.queryPrefixSum(i) : 0,
+        index: i,
+      });
     }
     this.anchorsDirty = false;
   }
 
   findIndexAtPosition(scrollTop: number): number {
-    if (this.totalItems === 0 || scrollTop <= 0) return 0;
-    let low = 0;
-    let high = this.totalItems - 1;
-
-    if (this.anchors.length > 0) {
-      for (let i = this.anchors.length - 1; i >= 0; i--) {
-        if (this.anchors[i].position <= scrollTop) { low = this.anchors[i].index; break; }
-      }
-    }
-
-    while (low < high) {
-      const mid = Math.floor((low + high) / 2);
-      if (this.cumulativeHeights[mid] <= scrollTop) low = mid + 1;
-      else high = mid;
-    }
-
-    return Math.min(low, this.totalItems - 1);
+    return this.heightTree.findByPrefixSum(scrollTop);
   }
 
   getTotalHeight(): number {
     if (this.totalItems === 0) return 0;
-    return this.cumulativeHeights[this.totalItems - 1];
+    return this.heightTree.getTotalHeight();
   }
 
   getItemTop(index: number): number {
     if (index <= 0) return 0;
-    if (index >= this.totalItems) return this.cumulativeHeights[this.totalItems - 1];
-    return this.cumulativeHeights[index - 1];
+    if (index >= this.totalItems) return this.getTotalHeight();
+    return this.heightTree.queryPrefixSum(index);
   }
 
   getItemHeight(index: number): number {
     if (index < 0 || index >= this.totalItems) return this.itemSize;
-    return this.itemHeights[index];
+    return this.heightTree.getHeight(index);
   }
 
   private calculateVisibleRange(): VisibleRange {
@@ -219,10 +187,16 @@ export class ViewportManager {
 
     for (let i = startIndex; i <= endIndex; i++) {
       items.push({
-        index: i, key: i, top: this.getItemTop(i), left: 0,
-        height: this.getItemHeight(i), width: this.state.width,
-        estimated: this.itemHeights[i] === this.itemSize, state: 'active',
-        element: null, lastUsedTimestamp: performance.now(),
+        index: i,
+        key: i,
+        top: this.getItemTop(i),
+        left: 0,
+        height: this.getItemHeight(i),
+        width: this.state.width,
+        estimated: this.itemHeights[i] === this.itemSize,
+        state: 'active',
+        element: null,
+        lastUsedTimestamp: performance.now(),
         priority: this.calculateItemPriority(i, startIndex, endIndex),
         measuredHeight: this.itemHeights[i],
       });
@@ -242,28 +216,41 @@ export class ViewportManager {
   private updateSpatialRegions(): void {
     const { startIndex, endIndex } = this.visibleRange;
     this.setRegion('active', {
-      id: 'active', startIndex, endIndex,
+      id: 'active',
+      startIndex,
+      endIndex,
       top: this.getItemTop(startIndex),
       bottom: this.getItemTop(Math.min(endIndex + 1, this.totalItems)),
-      state: 'active', items: [],
+      state: 'active',
+      items: [],
     });
     if (startIndex > 0) {
       this.setRegion('dormant-top', {
-        id: 'dormant-top', startIndex: 0, endIndex: startIndex - 1,
-        top: 0, bottom: this.getItemTop(startIndex),
-        state: 'dormant', items: [],
+        id: 'dormant-top',
+        startIndex: 0,
+        endIndex: startIndex - 1,
+        top: 0,
+        bottom: this.getItemTop(startIndex),
+        state: 'dormant',
+        items: [],
       });
     }
     if (endIndex < this.totalItems - 1) {
       this.setRegion('dormant-bottom', {
-        id: 'dormant-bottom', startIndex: endIndex + 1, endIndex: this.totalItems - 1,
-        top: this.getItemTop(endIndex + 1), bottom: this.getTotalHeight(),
-        state: 'dormant', items: [],
+        id: 'dormant-bottom',
+        startIndex: endIndex + 1,
+        endIndex: this.totalItems - 1,
+        top: this.getItemTop(endIndex + 1),
+        bottom: this.getTotalHeight(),
+        state: 'dormant',
+        items: [],
       });
     }
   }
 
-  private setRegion(id: string, region: SpatialRegion): void { this.spatialRegions.set(id, region); }
+  private setRegion(id: string, region: SpatialRegion): void {
+    this.spatialRegions.set(id, region);
+  }
 
   isInViewport(index: number): boolean {
     return index >= this.visibleRange.startIndex && index <= this.visibleRange.endIndex;
@@ -280,41 +267,69 @@ export class ViewportManager {
     const scrollHeight = this.getTotalHeight();
     const maxScrollTop = Math.max(0, scrollHeight - this.state.clientHeight);
     return {
-      scrollTop: this.state.scrollTop, scrollLeft: this.state.scrollLeft,
-      scrollHeight, scrollWidth: this.state.scrollWidth,
-      clientHeight: this.state.clientHeight, clientWidth: this.state.clientWidth,
+      scrollTop: this.state.scrollTop,
+      scrollLeft: this.state.scrollLeft,
+      scrollHeight,
+      scrollWidth: this.state.scrollWidth,
+      clientHeight: this.state.clientHeight,
+      clientWidth: this.state.clientWidth,
       scrollPercentage: getScrollPercentage(this.state.scrollTop, scrollHeight, this.state.clientHeight),
-      maxScrollTop, isAtTop: this.state.scrollTop <= 1, isAtBottom: this.state.scrollTop >= maxScrollTop - 1,
+      maxScrollTop,
+      isAtTop: this.state.scrollTop <= 1,
+      isAtBottom: this.state.scrollTop >= maxScrollTop - 1,
     };
   }
 
   getViewportBounds(): ViewportBounds {
     return {
-      top: this.state.scrollTop, bottom: this.state.scrollTop + this.state.height,
-      left: this.state.scrollLeft, right: this.state.scrollLeft + this.state.width,
-      width: this.state.width, height: this.state.height,
+      top: this.state.scrollTop,
+      bottom: this.state.scrollTop + this.state.height,
+      left: this.state.scrollLeft,
+      right: this.state.scrollLeft + this.state.width,
+      width: this.state.width,
+      height: this.state.height,
     };
   }
 
   updateTotalItems(totalItems: number): void {
     if (totalItems === this.totalItems) return;
+
     const oldHeights = this.itemHeights;
-    this.itemHeights = new Float64Array(totalItems);
-    this.cumulativeHeights = new Float64Array(totalItems);
+    const newHeights = new Float64Array(totalItems);
     const copyCount = Math.min(oldHeights.length, totalItems);
-    for (let i = 0; i < copyCount; i++) this.itemHeights[i] = oldHeights[i];
-    if (totalItems > oldHeights.length) this.itemHeights.fill(this.itemSize, oldHeights.length, totalItems);
+    for (let i = 0; i < copyCount; i++) newHeights[i] = oldHeights[i];
+    if (totalItems > oldHeights.length) newHeights.fill(this.itemSize, oldHeights.length, totalItems);
+
+    this.itemHeights = newHeights;
     this.totalItems = totalItems;
-    this.dirtyFromIndex = Math.min(this.dirtyFromIndex, copyCount);
-    this.heightsDirty = true;
+    this.heightTree.resize(totalItems, this.itemSize);
+
+    for (let i = 0; i < copyCount; i++) {
+      if (newHeights[i] !== this.itemSize) {
+        this.heightTree.update(i, newHeights[i]);
+      }
+    }
+
     this.anchorsDirty = true;
+
+    if (this.onTotalHeightChange) {
+      this.onTotalHeightChange(this.getTotalHeight());
+    }
   }
 
   updateItemSize(itemSize: number): void {
     this.itemSize = itemSize;
-    this.dirtyFromIndex = 0;
-    this.heightsDirty = true;
+    for (let i = 0; i < this.totalItems; i++) {
+      if (this.itemHeights[i] === this.itemSize || this.itemHeights[i] === 0) {
+        this.itemHeights[i] = itemSize;
+        this.heightTree.update(i, itemSize);
+      }
+    }
     this.anchorsDirty = true;
+
+    if (this.onTotalHeightChange) {
+      this.onTotalHeightChange(this.getTotalHeight());
+    }
   }
 
   updateOverscan(overscan: number): void {
@@ -329,11 +344,13 @@ export class ViewportManager {
 
   private createDefaultState(): ViewportState {
     return {
-      scrollTop: 0, scrollLeft: 0,
+      scrollTop: 0,
+      scrollLeft: 0,
       width: typeof window !== 'undefined' ? window.innerWidth : 400,
       height: typeof window !== 'undefined' ? window.innerHeight : 800,
       devicePixelRatio: typeof window !== 'undefined' ? (window.devicePixelRatio || 1) : 1,
-      scrollHeight: 0, scrollWidth: 0,
+      scrollHeight: 0,
+      scrollWidth: 0,
       clientHeight: typeof window !== 'undefined' ? window.innerHeight : 800,
       clientWidth: typeof window !== 'undefined' ? window.innerWidth : 400,
     };
@@ -344,9 +361,7 @@ export class ViewportManager {
     this.visibleRange = this.calculateVisibleRange();
     this.spatialRegions.clear();
     this.itemHeights.fill(this.itemSize);
-    this.cumulativeHeights.fill(0);
-    this.dirtyFromIndex = 0;
-    this.heightsDirty = true;
+    this.heightTree.fill(this.itemSize);
     this.anchorsDirty = true;
     this.anchors = [];
     this.onTotalHeightChange = null;

@@ -1,10 +1,6 @@
-import type {
-  PerceptualEngine,
-  ScrollRestoration,
-  ScrollRestorationStrategy,
-  PersistenceStorage,
-} from '@perceptual/core';
-import type { ElementsRenderedPayload } from '@/perceptual-engine/core/src/types/engine';
+import { PerceptualEngine } from '@/perceptual-engine/core/src/engine/PerceptualEngine';
+import { PersistenceStorage } from '@/perceptual-engine/core/src/engine/ScrollRestoration';
+import type { ElementsRenderedPayload, ScrollRestorationStrategy } from '@/perceptual-engine/core/src/types/engine';
 
 export interface PerceptualListProps<T = unknown> {
   items: readonly T[];
@@ -26,11 +22,7 @@ export interface PerceptualListProps<T = unknown> {
 }
 
 export interface PerceptualListHandle {
-  scrollToIndex: (
-    index: number,
-    align?: 'start' | 'center' | 'end',
-    behavior?: ScrollBehavior,
-  ) => void;
+  scrollToIndex: (index: number, align?: 'start' | 'center' | 'end', behavior?: ScrollBehavior) => void;
   scrollTo: (top: number, behavior?: ScrollBehavior) => void;
   refresh: () => void;
   saveScrollState: () => void;
@@ -57,11 +49,7 @@ export interface PerceptualGridProps<T = unknown> {
 }
 
 export interface PerceptualGridHandle {
-  scrollToIndex: (
-    index: number,
-    align?: 'start' | 'center' | 'end',
-    behavior?: ScrollBehavior,
-  ) => void;
+  scrollToIndex: (index: number, align?: 'start' | 'center' | 'end', behavior?: ScrollBehavior) => void;
   scrollTo: (top: number, behavior?: ScrollBehavior) => void;
   refresh: () => void;
   saveScrollState: () => void;
@@ -86,6 +74,7 @@ export interface UsePerceptualEngineOptions {
   onScroll?: (scrollTop: number) => void;
   onVisibleRangeChange?: (start: number, end: number) => void;
   onElementsRendered?: (payload: ElementsRenderedPayload) => void;
+  onTotalHeightChange?: (totalHeight: number) => void;
 }
 
 export interface EngineHandle {

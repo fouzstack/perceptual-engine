@@ -83,10 +83,6 @@ export interface EngineConfig {
   debounceScrollMs: number;
   useContentVisibility: boolean;
   useContainment: boolean;
-  onMetricsUpdate?: (metrics: PerceptualMetrics) => void;
-  onScrollUpdate?: (scrollState: ScrollUpdatePayload) => void;
-  onError?: (error: EngineError) => void;
-  onQualityChange?: (quality: QualityLevel) => void;
 }
 
 export interface PerceptualMetrics {
@@ -174,4 +170,15 @@ export interface ElementsRenderedPayload {
   recycled: HTMLElement[];
   updated: HTMLElement[];
   removed: number[];
+}
+
+export interface RuntimeMetrics {
+  renderEpoch: { currentEpoch: number; activeEpochs: number; cancelledEpochs: number };
+  measurements: { queueSize: number };
+  quality: { level: string };
+  transaction: { activeTransactions: number; recoveryAttempts: number; currentFrameId: number };
+  memory: { pressureLevel: string };
+  performance: { fps: number; frameTime: number; droppedFrames: number; droppedPercentage: number; stability: number; totalFrames: number };
+  pool: { poolSize: number; activeCount: number; freeCount: number; hitRate: number; hits: number; misses: number; minSize: number; maxSize: number; lruQueueSize: number };
+  viewport: { startIndex: number; endIndex: number; totalVisible: number; overscanBefore: number; overscanAfter: number };
 }

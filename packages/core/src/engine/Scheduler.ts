@@ -1,9 +1,14 @@
+/*
+13
+src/perceptual-engine/core/src/engine/Scheduler.ts
+*/
+
 import {
   ScheduledTask,
   TaskPriority,
   TaskType,
   SchedulerConfig,
-  FrameBudget,
+  FrameBudget as SchedulerFrameBudget,
   SchedulerStats,
 } from '../types/scheduler';
 
@@ -166,7 +171,6 @@ export class Scheduler {
     this.pendingTasks.delete(task.id);
   }
 
-  // Comprueba si requestIdleCallback está disponible
   private hasIdleCallback(): boolean {
     return typeof window !== 'undefined' && 'requestIdleCallback' in window;
   }
@@ -175,7 +179,7 @@ export class Scheduler {
     if (this.idleId !== null || !this.hasLowPriorityTasks()) return;
 
     if (this.hasIdleCallback()) {
-      this.idleId = (window as any).requestIdleCallback(
+      this.idleId = (window as unknown as { requestIdleCallback: (cb: (d: IdleDeadline) => void, opts?: { timeout: number }) => number }).requestIdleCallback(
         (d: IdleDeadline) => {
           this.idleId = null;
           this.processIdleTasks(d);
@@ -183,7 +187,6 @@ export class Scheduler {
         { timeout: this.config.idleTimeout },
       );
     } else {
-      // Usar setTimeout como fallback
       this.idleId = window.setTimeout(() => {
         this.idleId = null;
         this.processIdleTasks({
@@ -230,18 +233,12 @@ export class Scheduler {
   private calculateDeadline(p: TaskPriority): number {
     const n = performance.now();
     switch (p) {
-      case 'immediate':
-        return n;
-      case 'high':
-        return n + 16;
-      case 'normal':
-        return n + 50;
-      case 'low':
-        return n + 200;
-      case 'idle':
-        return n + 1000;
-      default:
-        return n + 50;
+      case 'immediate': return n;
+      case 'high': return n + 16;
+      case 'normal': return n + 50;
+      case 'low': return n + 200;
+      case 'idle': return n + 1000;
+      default: return n + 50;
     }
   }
 
@@ -267,20 +264,14 @@ export class Scheduler {
     }
   }
 
-  start(): void {
-    this.isRunning = true;
-    if (this.getTotalPendingTasks() > 0) this.scheduleFrame();
-  }
+  start(): void { this.isRunning = true; if (this.getTotalPendingTasks() > 0) this.scheduleFrame(); }
 
   stop(): void {
     this.isRunning = false;
-    if (this.frameId !== null) {
-      cancelAnimationFrame(this.frameId);
-      this.frameId = null;
-    }
+    if (this.frameId !== null) { cancelAnimationFrame(this.frameId); this.frameId = null; }
     if (this.idleId !== null) {
       if (this.hasIdleCallback()) {
-        (window as any).cancelIdleCallback(this.idleId);
+        (window as unknown as { cancelIdleCallback: (id: number) => void }).cancelIdleCallback(this.idleId);
       } else {
         clearTimeout(this.idleId);
       }
@@ -294,44 +285,29 @@ export class Scheduler {
     this.executionTimes = [];
   }
 
-  getStats(): SchedulerStats {
-    return { ...this.stats };
-  }
-
-  getPendingTaskCount(): number {
-    return this.getTotalPendingTasks();
-  }
+  getStats(): SchedulerStats { return { ...this.stats }; }
+  getPendingTaskCount(): number { return this.getTotalPendingTasks(); }
 
   getPendingTasksByType(): Map<TaskType, number> {
     const m = new Map<TaskType, number>();
     this.queues.forEach((q) =>
-      q
-        .filter((t) => !t.cancelled && !t.completed)
+      q.filter((t) => !t.cancelled && !t.completed)
         .forEach((t) => m.set(t.type, (m.get(t.type) || 0) + 1)),
     );
     return m;
   }
 
-  getFrameBudget(): FrameBudget {
+  getFrameBudget(): SchedulerFrameBudget {
     const u = (this.stats.frameUtilization / 100) * 16.67;
-    return {
-      total: 16.67,
-      used: u,
-      remaining: Math.max(0, 16.67 - u),
-      tasks: this.stats.tasksExecuted,
-    };
+    return { total: 16.67, used: u, remaining: Math.max(0, 16.67 - u), tasks: this.stats.tasksExecuted };
   }
 
   destroy(): void {
     this.stop();
     this.clear();
-    this.stats = {
-      tasksExecuted: 0,
-      tasksCancelled: 0,
-      averageExecutionTime: 0,
-      frameUtilization: 0,
-      droppedFrames: 0,
-    };
+    this.stats = { tasksExecuted: 0, tasksCancelled: 0, averageExecutionTime: 0, frameUtilization: 0, droppedFrames: 0 };
     this.executionTimes = [];
   }
 }
+
+
